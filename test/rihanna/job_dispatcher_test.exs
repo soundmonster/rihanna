@@ -6,6 +6,7 @@ defmodule Rihanna.JobDispatcherTest do
   alias Rihanna.Mocks.{
     LongJob,
     BehaviourMock,
+    ExitBehaviourMock,
     MFAMock,
     BadMFAMock,
     BadBehaviourWithBadAfterErrorMock,
@@ -334,6 +335,27 @@ defmodule Rihanna.JobDispatcherTest do
 
       refute Enum.any?(state.working)
       assert is_pid(state.pg)
+    end
+  end
+
+  describe "handle_info/2 with job that exits" do
+    setup do
+      {:ok, dispatcher} =
+        Rihanna.JobDispatcher.start_link([db: Application.fetch_env!(:rihanna, :postgrex)], [])
+
+      {:ok, %{dispatcher: dispatcher}}
+    end
+
+    test "marks job as failed", %{pg: pg} do
+      {:ok, %{id: id}} =
+        Rihanna.Job.enqueue({ExitBehaviourMock, [self(), "shine bright like a diamond"]})
+
+      wait_for_task_execution()
+
+      job = get_job_by_id(pg, id)
+
+      assert "{:bad, :exited_with_error}" == job.fail_reason
+      assert %DateTime{} = job.failed_at
     end
   end
 

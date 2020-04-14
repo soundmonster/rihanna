@@ -105,6 +105,18 @@ defmodule Rihanna.Mocks do
     end
   end
 
+  defmodule ExitBehaviourMock do
+    @behaviour Rihanna.Job
+
+    def perform(_) do
+      exit({:bad, :exited_with_error})
+    end
+
+    def after_error(_reason, [pid | _]) do
+      Process.send(pid, "After error callback", [])
+    end
+  end
+
   defmodule MockJob do
     @behaviour Rihanna.Job
 
