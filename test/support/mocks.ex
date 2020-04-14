@@ -105,15 +105,22 @@ defmodule Rihanna.Mocks do
     end
   end
 
-  defmodule ExitBehaviourMock do
+  defmodule ExitWithRetryBehaviourMock do
     @behaviour Rihanna.Job
 
-    def perform(_) do
-      exit({:bad, :exited_with_error})
+    def perform([pid, msg]) do
+      Process.send(pid, {msg, self()}, [])
+      exit(:bad_exit)
     end
 
-    def after_error(_reason, [pid | _]) do
-      Process.send(pid, "After error callback", [])
+    # Retry once
+    def retry_at(_reason, _arg, 0) do
+      # Retry immediately
+      {:ok, DateTime.utc_now()}
+    end
+
+    def retry_at(_, _, _) do
+      :noop
     end
   end
 

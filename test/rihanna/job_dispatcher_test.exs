@@ -6,7 +6,7 @@ defmodule Rihanna.JobDispatcherTest do
   alias Rihanna.Mocks.{
     LongJob,
     BehaviourMock,
-    ExitBehaviourMock,
+    ExitWithRetryBehaviourMock,
     MFAMock,
     BadMFAMock,
     BadBehaviourWithBadAfterErrorMock,
@@ -348,14 +348,32 @@ defmodule Rihanna.JobDispatcherTest do
 
     test "marks job as failed", %{pg: pg} do
       {:ok, %{id: id}} =
-        Rihanna.Job.enqueue({ExitBehaviourMock, [self(), "shine bright like a diamond"]})
+        Rihanna.Job.enqueue({ExitWithRetryBehaviourMock, [self(), "shine bright like a diamond"]})
 
       wait_for_task_execution()
 
       job = get_job_by_id(pg, id)
 
-      assert "{:bad, :exited_with_error}" == job.fail_reason
       assert %DateTime{} = job.failed_at
+      assert ":bad_exit" = job.fail_reason
+    end
+
+    test "retries job once, marks job as failed on irregular exit", %{pg: pg} do
+      ref = make_ref()
+      {:ok, %{id: id}} = Rihanna.Job.enqueue({ExitWithRetryBehaviourMock, [self(), ref]})
+
+      # First failure
+      assert_receive {^ref, _}
+      wait_for_task_execution()
+
+      # Retry failure
+      assert_receive {^ref, _}
+      wait_for_task_execution()
+
+      job = get_job_by_id(pg, id)
+
+      assert ":bad_exit" = job.fail_reason
+      assert job.rihanna_internal_meta["attempts"] == 1
     end
   end
 
