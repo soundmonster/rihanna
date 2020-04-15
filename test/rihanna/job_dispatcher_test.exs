@@ -7,6 +7,7 @@ defmodule Rihanna.JobDispatcherTest do
     LongJob,
     BehaviourMock,
     ExitWithRetryBehaviourMock,
+    RaiseWithRetryBehaviourMock,
     MFAMock,
     BadMFAMock,
     BadBehaviourWithBadAfterErrorMock,
@@ -338,7 +339,48 @@ defmodule Rihanna.JobDispatcherTest do
     end
   end
 
-  describe "handle_info/2 with job that exits" do
+  describe "handle_info/2 with job that raises and has a retry callback" do
+    setup do
+      {:ok, dispatcher} =
+        Rihanna.JobDispatcher.start_link([db: Application.fetch_env!(:rihanna, :postgrex)], [])
+
+      {:ok, %{dispatcher: dispatcher}}
+    end
+
+    test "marks job as failed", %{pg: pg} do
+      {:ok, %{id: id}} =
+        Rihanna.Job.enqueue(
+          {RaiseWithRetryBehaviourMock, [self(), "shine bright like a diamond"]}
+        )
+
+      wait_for_task_execution()
+
+      job = get_job_by_id(pg, id)
+
+      assert %DateTime{} = job.failed_at
+      assert ":bad_exit" = job.fail_reason
+    end
+
+    test "retries job once, marks job as failed on irregular exit", %{pg: pg} do
+      ref = make_ref()
+      {:ok, %{id: id}} = Rihanna.Job.enqueue({RaiseWithRetryBehaviourMock, [self(), ref]})
+
+      # First failure
+      assert_receive {^ref, _}
+      wait_for_task_execution()
+
+      # Retry failure
+      assert_receive {^ref, _}
+      wait_for_task_execution()
+
+      job = get_job_by_id(pg, id)
+
+      assert ":bad_exit" = job.fail_reason
+      assert job.rihanna_internal_meta["attempts"] == 1
+    end
+  end
+
+  describe "handle_info/2 with job that exits and has a retry callback" do
     setup do
       {:ok, dispatcher} =
         Rihanna.JobDispatcher.start_link([db: Application.fetch_env!(:rihanna, :postgrex)], [])
@@ -355,7 +397,8 @@ defmodule Rihanna.JobDispatcherTest do
       job = get_job_by_id(pg, id)
 
       assert %DateTime{} = job.failed_at
-      assert ":bad_exit" = job.fail_reason
+      assert job.fail_reason =~ "Job Failed"
+      assert job.fail_reason =~ "{:error, {:exit"
     end
 
     test "retries job once, marks job as failed on irregular exit", %{pg: pg} do
@@ -372,7 +415,7 @@ defmodule Rihanna.JobDispatcherTest do
 
       job = get_job_by_id(pg, id)
 
-      assert ":bad_exit" = job.fail_reason
+      assert job.fail_reason =~ "Job Failed"
       assert job.rihanna_internal_meta["attempts"] == 1
     end
   end

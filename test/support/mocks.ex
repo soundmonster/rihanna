@@ -110,7 +110,49 @@ defmodule Rihanna.Mocks do
 
     def perform([pid, msg]) do
       Process.send(pid, {msg, self()}, [])
-      exit(:bad_exit)
+
+      1..20
+      |> Task.async_stream(
+        fn i ->
+          :timer.sleep(:rand.uniform(i * 10))
+          i
+        end,
+        ordered: false,
+        timeout: 50
+      )
+      |> Stream.map(&IO.inspect/1)
+      |> Stream.run()
+
+      :ok
+    rescue
+      e -> {:error, {:raised, e}}
+    catch
+      :exit, e -> {:error, {:exit, e}}
+    end
+
+    # Retry once
+    def retry_at(_reason, _arg, 0) do
+      # Retry immediately
+      {:ok, DateTime.utc_now()}
+    end
+
+    def retry_at(_, _, _) do
+      :noop
+    end
+  end
+
+  defmodule RaiseWithRetryBehaviourMock do
+    @behaviour Rihanna.Job
+
+    def perform([pid, msg]) do
+      Process.send(pid, {msg, self()}, [])
+      raise "boom"
+      # if :rand.uniform() > 0.5, do: raise("Kaboom!")
+      # :ok
+    rescue
+      e -> {:error, {:raised, e}}
+    catch
+      :exit, e -> {:error, {:exit, e}}
     end
 
     # Retry once
